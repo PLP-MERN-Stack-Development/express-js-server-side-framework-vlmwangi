@@ -1,4 +1,4 @@
-// server.js - Starter Express server for Week 2 assignment
+// server.js - Express RESTful API for Week 2 assignment
 
 // Import required modules
 const express = require('express');
@@ -9,10 +9,35 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Middleware Implementation
+
 // Middleware setup
 app.use(bodyParser.json());
 
-// Sample in-memory products database
+// Custom logger middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+// Simple authentication middleware
+const authenticate = (req, res, next) => {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey || apiKey !== 'mysecretkey') {
+    return res.status(401).json({ message: 'Unauthorized: Invalid API Key' });
+  }
+  next();
+};
+
+// Error handling middleware
+const errorHandler = (err, req, res, next) => {
+  console.error('Error:', err.message);
+  res.status(err.status || 500).json({
+    error: { message: err.message || 'Internal Server Error' }
+  });
+};
+
+// Sample database
 let products = [
   {
     id: '1',
@@ -40,27 +65,85 @@ let products = [
   }
 ];
 
+// GET /api/products - Get all products
+app.get('/api/products', (req, res) => {
+  let result = [...products];
+  const { category, name, page = 1, limit = 5 } = req.query;
+
+  if (category) result = result.filter(p => p.category === category);
+  if (name) result = result.filter(p => p.name.toLowerCase().includes(name.toLowerCase()));
+
+  const start = (page - 1) * limit;
+  const paginated = result.slice(start, start + Number(limit));
+
+  res.json({ total: result.length, products: paginated });
+});
+
+// GET /api/products/:id - Get a specific product
+app.get('/api/products/:id', (req, res, next) => {
+  const product = products.find(p => p.id === req.params.id);
+  if (!product) return next({ status: 404, message: 'Product not found' });
+  res.json(product);
+});
+
+// GET /api/products/stats - Get product statistics
+app.get('/api/products/stats', (req, res) => {
+  const stats = products.reduce((acc, product) => {
+    acc[product.category] = (acc[product.category] || 0) + 1;
+    return acc;
+  }, {});
+  res.json({ totalProducts: products.length, countByCategory: stats });
+});
+
+// POST /api/products - Create a new product
+app.post('/api/products', authenticate, (req, res, next) => {
+  const { name, description, price, category, inStock } = req.body;
+
+  // Basic validation
+  if (!name || !description || price == null || !category || inStock == null) {
+    return next({ status: 400, message: 'All product fields are required' });
+  }
+
+  const newProduct = {
+    id: uuidv4(),
+    name,
+    description,
+    price,
+    category,
+    inStock
+  };
+
+  products.push(newProduct);
+  res.status(201).json(newProduct);
+});
+
+// PUT /api/products/:id - Update a product
+app.put('/api/products/:id', authenticate, (req, res, next) => {
+  const index = products.findIndex(p => p.id === req.params.id);
+  if (index === -1) return next({ status: 404, message: 'Product not found' });
+
+  const updatedProduct = { ...products[index], ...req.body };
+  products[index] = updatedProduct;
+
+  res.json(updatedProduct);
+});
+
+// DELETE /api/products/:id - Delete a product
+app.delete('/api/products/:id', authenticate, (req, res, next) => {
+  const index = products.findIndex(p => p.id === req.params.id);
+  if (index === -1) return next({ status: 404, message: 'Product not found' });
+
+  const deleted = products.splice(index, 1);
+  res.json({ message: 'Product deleted successfully', deleted });
+});
+
+// Error handling middleware
+app.use(errorHandler);
+
 // Root route
 app.get('/', (req, res) => {
-  res.send('Welcome to the Product API! Go to /api/products to see all products.');
+  res.send('Hello World! This is the Express RESTful API server.');
 });
-
-// TODO: Implement the following routes:
-// GET /api/products - Get all products
-// GET /api/products/:id - Get a specific product
-// POST /api/products - Create a new product
-// PUT /api/products/:id - Update a product
-// DELETE /api/products/:id - Delete a product
-
-// Example route implementation for GET /api/products
-app.get('/api/products', (req, res) => {
-  res.json(products);
-});
-
-// TODO: Implement custom middleware for:
-// - Request logging
-// - Authentication
-// - Error handling
 
 // Start the server
 app.listen(PORT, () => {
